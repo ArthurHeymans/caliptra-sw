@@ -563,7 +563,7 @@ pub trait HwModel {
             }
             writeln!(self.output().logger(), "ready_for_fw is high")?;
             self.cover_fw_mage(fw_image);
-            if boot_params.fw_via_rri {
+            if boot_params.fw_via_rri ||true{
                 self.upload_firmware_rri(fw_image)?;
             } else {
                 self.upload_firmware(fw_image)?;

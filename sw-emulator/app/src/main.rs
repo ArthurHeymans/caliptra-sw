@@ -37,7 +37,7 @@ use gdb::gdb_state;
 use tock_registers::register_bitfields;
 
 /// Firmware Load Command Opcode
-const FW_LOAD_CMD_OPCODE: u32 = 0x4657_4C44;
+//const FW_LOAD_CMD_OPCODE: u32 = 0x4657_4C44;
 
 /// The number of CPU clock cycles it takes to write the firmware to the mailbox.
 const FW_WRITE_TICKS: u64 = 1000;
@@ -267,6 +267,7 @@ fn main() -> io::Result<()> {
         },
     );
 
+    let recovery_img = current_fw_buf.clone();
     let bus_args = CaliptraRootBusArgs {
         rom: rom_buffer,
         log_dir: args_log_dir.clone(),
@@ -279,6 +280,7 @@ fn main() -> io::Result<()> {
             let firmware_buffer = current_fw_buf.clone();
             args.schedule_later(FW_WRITE_TICKS, move |mailbox: &mut MailboxInternal| {
                 upload_fw_to_mailbox(mailbox, firmware_buffer);
+
             });
         }),
         security_state,
@@ -297,7 +299,8 @@ fn main() -> io::Result<()> {
         ..Default::default()
     };
 
-    let root_bus = CaliptraRootBus::new(&clock, bus_args);
+    let mut root_bus = CaliptraRootBus::new(&clock, bus_args);
+    root_bus.recovery.cms_data = Some(recovery_img);
     let soc_ifc = unsafe {
         caliptra_registers::soc_ifc::RegisterBlock::new_with_mmio(
             0x3003_0000 as *mut u32,
@@ -422,38 +425,15 @@ fn change_dword_endianess(data: &mut Vec<u8>) {
     }
 }
 
-fn upload_fw_to_mailbox(mailbox: &mut MailboxInternal, firmware_buffer: Rc<Vec<u8>>) {
+fn upload_fw_to_mailbox(mailbox: &mut MailboxInternal, _firmware_buffer: Rc<Vec<u8>>) {
     let soc_mbox = mailbox.as_external().regs();
     // Write the cmd to mailbox.
 
     assert!(!soc_mbox.lock().read().lock());
 
-    soc_mbox.cmd().write(|_| FW_LOAD_CMD_OPCODE);
-    soc_mbox.dlen().write(|_| firmware_buffer.len() as u32);
-
-    //
-    // Write firmware image.
-    //
-    let word_size = std::mem::size_of::<u32>();
-    let remainder = firmware_buffer.len() % word_size;
-    let n = firmware_buffer.len() - remainder;
-
-    for idx in (0..n).step_by(word_size) {
-        soc_mbox.datain().write(|_| {
-            u32::from_le_bytes(firmware_buffer[idx..idx + word_size].try_into().unwrap())
-        });
-    }
-
-    // Handle the remainder bytes.
-    if remainder > 0 {
-        let mut last_word = firmware_buffer[n] as u32;
-        for idx in 1..remainder {
-            last_word |= (firmware_buffer[n + idx] as u32) << (idx << 3);
-        }
-        soc_mbox.datain().write(|_| last_word);
-    }
-
-    // Set the execute register.
+    const RI_DOWNLOAD_FIRMWARE: u32 = 0x5249_4644;
+    soc_mbox.cmd().write(|_| RI_DOWNLOAD_FIRMWARE);
+    soc_mbox.dlen().write(|_| 0);
     soc_mbox.execute().write(|w| w.execute(true));
 }
 

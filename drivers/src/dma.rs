@@ -224,10 +224,9 @@ impl Dma {
             length: core::mem::size_of::<u32>() as u32,
             origin: DmaWriteOrigin::AhbFifo,
         };
-
+        self.dma_write_fifo(write_val.as_bytes())?;
         self.setup_dma_write(write_transaction);
         self.do_transaction()?;
-        self.dma_write_fifo(write_val.as_bytes())?;
         Ok(())
     }
 
@@ -245,8 +244,6 @@ impl Dma {
         // Write the source address to SA(L) and SA(H) registers.
         dma_reg.src_addr_l().write(|_| INDIRECT_FIFO_DATA_OFFSET);
         dma_reg.src_addr_h().write(|_| 0);
-
-        // [TODO] Acquire the mailbox lock.
 
         // Write Control register.
         dma_reg

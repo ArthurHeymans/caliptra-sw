@@ -114,7 +114,7 @@ build-rom:
 		--fw /dev/null
 
 run: build-emu build-fw-image build-rom
-	cargo \
+	RUST_BACKTRACE=1 cargo \
 		"--config=$(EXTRA_CARGO_CONFIG)" \
 		run \
 		-p caliptra-emu \

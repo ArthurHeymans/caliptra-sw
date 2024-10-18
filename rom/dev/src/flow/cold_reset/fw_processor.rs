@@ -46,16 +46,18 @@ use zeroize::Zeroize;
 const ACTIVE_MODE: bool = true;
 const PAYLOAD_AVAILABLE: bool = true;
 const RECOVERY_INTERFACE_ADDRESS: u32 = 0x0;
+const RRI_BASE: u32 = 0x1003_8000;
 const PROT_CAP_OFFSET: u32 = 0x0;
-const PROT_CAP_AGENT_BYTE_10_OFFSET: u32 = PROT_CAP_OFFSET + 10;
-const PROT_CAP_AGENT_BYTE_11_OFFSET: u32 = PROT_CAP_OFFSET + 11;
+const PROT_CAP_AGENT_BYTE_8_OFFSET: u32 = PROT_CAP_OFFSET + 8;
+//const PROT_CAP_AGENT_BYTE_11_OFFSET: u32 = PROT_CAP_OFFSET + 11;
 const DEVICE_ID_OFFSET: u32 = PROT_CAP_OFFSET + 0x10;
 const DEVICE_STATUS_OFFSET: u32 = PROT_CAP_OFFSET + 0x28;
 const DEVICE_RESET_OFFSET: u32 = PROT_CAP_OFFSET + 0x30;
 const RECOVERY_CTRL_OFFSET: u32 = PROT_CAP_OFFSET + 0x34;
 const RECOVERY_STATUS_OFFSET: u32 = PROT_CAP_OFFSET + 0x38;
 const HW_STATUS_OFFSET: u32 = PROT_CAP_OFFSET + 0x3C;
-const INDIRECT_FIFO_CTRL_OFFSET: u32 = PROT_CAP_OFFSET + 0x40;
+const INDIRECT_FIFO_CONTROL: u32 = PROT_CAP_OFFSET + 0x40;
+const INDIRECT_FIFO_IMAGE_SIZE: u32 = PROT_CAP_OFFSET + 0x44;
 const INDIRECT_FIFO_STATUS_OFFSET: u32 = PROT_CAP_OFFSET + 0x48;
 const INDIRECT_FIFO_DATA_OFFSET: u32 = PROT_CAP_OFFSET + 0x6C;
 
@@ -334,7 +336,7 @@ impl FirmwareProcessor {
                         txn.complete(true)?;
 
                         // Download the firmware image from the recovery interface.
-                        let image_size_bytes = Self::retrieve_image_from_ri(dma)?;
+                        let image_size_bytes = Self::retrieve_image_from_ri(dma, mbox)?;
 
                         let txn = ManuallyDrop::new(mbox.raw_recv_txn());
                         cprintln!("[fwproc] Received Image from Recovery Interface of size {} bytes", image_size_bytes);
@@ -770,33 +772,53 @@ impl FirmwareProcessor {
     ///   Error code on failure.
     fn retrieve_image_from_ri(
         dma: &mut Dma,
+        mbox: &mut Mailbox
     ) -> CaliptraResult<u32> {
+        cprintln!("Hello");
+
         // 1. Set PROT_CAP:Byte11 bit3 to 1 ('Flashless boot').
-        let mut prot_cap_byte_11_val = dma.read_dword(PROT_CAP_AGENT_BYTE_11_OFFSET as usize)?;
-        prot_cap_byte_11_val |= 1 << 1; // Set bit 1
-        dma.write_dword(PROT_CAP_AGENT_BYTE_11_OFFSET as usize, prot_cap_byte_11_val)?;
+        let mut prot_cap_byte_8_val = dma.read_dword((RRI_BASE + PROT_CAP_AGENT_BYTE_8_OFFSET) as usize)?;
+        prot_cap_byte_8_val |= 1 << (1 + 24); // Set bit 1
+                cprintln!("Hello");
+        dma.write_dword((RRI_BASE + PROT_CAP_AGENT_BYTE_8_OFFSET) as usize, prot_cap_byte_8_val)?;
+
+        cprintln!("Hello");
 
         // 2. Set DEVICE_STATUS:Byte0 to 0x3 ('Recovery mode - ready to accept recovery image').
-        dma.write_dword(DEVICE_STATUS_OFFSET as usize, 0x3)?;
+        dma.write_dword((RRI_BASE + DEVICE_STATUS_OFFSET) as usize, 0x3)?;
+
+        cprintln!("Hello");
 
         // 3. Set DEVICE_STATUS:Byte[2:3] to 0x12 ('Recovery Reason Codes' 0x12 = 0 Flashless/Streaming Boot (FSB)).
-        dma.write_dword((DEVICE_RESET_OFFSET + 2) as usize, 0x12)?;
+        dma.write_dword((RRI_BASE + DEVICE_RESET_OFFSET) as usize, 0x12 << 16)?;
+
+        cprintln!("Hello");
 
         // 4. Set RECOVERY_STATUS register:Byte0 Bit[3:0] to 0x1 ('Awaiting recovery image') & 
         // Byte0 Bit[7:4] to 0 (Recovery image index).
-        let mut recovery_status_val = dma.read_dword(RECOVERY_STATUS_OFFSET as usize)?;
+        let mut recovery_status_val = dma.read_dword((RRI_BASE + RECOVERY_STATUS_OFFSET) as usize)?;
         recovery_status_val = (recovery_status_val & 0xFFFFFF00) | 0x1;
-        dma.write_dword(RECOVERY_STATUS_OFFSET as usize, recovery_status_val)?;
+        dma.write_dword((RRI_BASE + RECOVERY_STATUS_OFFSET) as usize, recovery_status_val)?;
+
+        cprintln!("Hello");
 
         // 5. Loop on the 'payload_available' signal for the recovery image details to be available.
         while PAYLOAD_AVAILABLE == false {
             // Wait for the payload available signal.
         }
 
-        // 6. Read the image size from INDIRECT_FIFO_CTRL register:Byte[2:5]. Image size in DWORDs.
-        let image_size_dword = dma.read_dword((INDIRECT_FIFO_CTRL_OFFSET + 2) as usize)?;
+        // 6. Request CMS 0 and reset
+        dma.write_dword((RRI_BASE + INDIRECT_FIFO_CONTROL) as usize, 0x100)?;
 
-        // 7. Transfer the image from the recovery interface to the mailbox SRAM.
+        // 6. Read the image size from INDIRECT_FIFO_CTRL register:Byte[2:5]. Image size in DWORDs.
+        let image_size_dword = dma.read_dword((RRI_BASE + INDIRECT_FIFO_IMAGE_SIZE) as usize)?;
+        cprintln!("Image size {:?}", image_size_dword);
+
+        // 7. Acquire mailbox lock
+        let mut txn = mbox.try_start_send_txn().unwrap();
+        txn.send_request(0xdead_beef, b"").unwrap();
+
+        // 8. Transfer the image from the recovery interface to the mailbox SRAM.
         let image_size_bytes = image_size_dword * 4;
         dma.transfer_payload_to_mbox(image_size_bytes)?;
 

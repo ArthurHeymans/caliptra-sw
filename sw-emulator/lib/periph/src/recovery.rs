@@ -202,7 +202,7 @@ pub struct RecoveryRegisterInterface {
     //    #[register_array(offset = 0x00)]
     //    prot_cap_magic: [u8; 8],
     #[register(offset = 0x08)]
-    prot_cap_version: ReadOnlyRegister<u32, VersionCapabilities::Register>,
+    prot_cap_version: ReadWriteRegister<u32, VersionCapabilities::Register>,
 
     #[register(offset = 0x0c)]
     prot_cap_cms_timing: ReadOnlyRegister<u32, CmsTimings::Register>,
@@ -217,7 +217,7 @@ pub struct RecoveryRegisterInterface {
     //    #[register_array(offset = 0x12)]
     //    device_id: [u8; 22],
     #[register(offset = 0x28)]
-    device_info: ReadOnlyRegister<u32, DeviceInfo::Register>,
+    device_info: ReadWriteRegister<u32, DeviceInfo::Register>,
 
     //    #[register(offset = 0x2c)]
     //    hearthbeat: ReadOnlyRegister<u16>, // TODO do we need hearthbeat?
@@ -231,7 +231,7 @@ pub struct RecoveryRegisterInterface {
     recovery_control: ReadWriteRegister<u32, RecoveryControl::Register>,
 
     #[register(offset = 0x38)]
-    recovery_status: ReadOnlyRegister<u32, RecoveryStatus::Register>,
+    recovery_status: ReadWriteRegister<u32, RecoveryStatus::Register>,
 
     #[register(offset = 0x3c)]
     hw_status: ReadOnlyRegister<u32, HwStatus::Register>,
@@ -272,7 +272,7 @@ impl RecoveryRegisterInterface {
     pub fn new() -> Self {
         Self {
             //            prot_cap_magic: Self::MAGIC,
-            prot_cap_version: ReadOnlyRegister::new(
+            prot_cap_version: ReadWriteRegister::new(
                 VersionCapabilities::MAJOR.val(Self::MAJOR_VERSION).value
                     | VersionCapabilities::MINOR.val(Self::MINOR_VERSION).value,
             ),
@@ -284,7 +284,7 @@ impl RecoveryRegisterInterface {
             // device_id_descriptor_type: ReadOnlyRegister::new(DidType::TYPE::UUID.value), // TODO
             // device_id_vendor_id_string_length: ReadOnlyRegister::new(0), // not supported
             // device_id: [0; 22],
-            device_info: ReadOnlyRegister::new(
+            device_info: ReadWriteRegister::new(
                 DeviceInfo::STATUS::DeviceHealthy.value
                     | DeviceInfo::ERROR::NoProtocolError.value
                     | DeviceInfo::RECOVERY_REASON::NoBootFailureDetected.value,
@@ -293,7 +293,7 @@ impl RecoveryRegisterInterface {
             // vendor_status_length: ReadOnlyRegister::new(0),
             device_reset: ReadWriteRegister::new(0),
             recovery_control: ReadWriteRegister::new(0),
-            recovery_status: ReadOnlyRegister::new(0),
+            recovery_status: ReadWriteRegister::new(0),
             hw_status: ReadOnlyRegister::new(0), // TODO
             indirect_fifo_ctrl: ReadWriteRegister::new(0),
             indirect_fifo_image_size: ReadOnlyRegister::new(0),
@@ -360,7 +360,7 @@ impl RecoveryRegisterInterface {
                 } else {
                     self.indirect_fifo_image_size
                         .reg
-                        .set(image.len().try_into().unwrap());
+                        .set(image.len() as u32 / 4); // DWORD
                     self.indirect_fifo_status
                     .reg
                     .set(IndirectStatus::REGION_TYPE::CodeSpaceRecovery.value);
