@@ -39,6 +39,7 @@ use caliptra_image_types::{ImageManifest, IMAGE_BYTE_SIZE};
 use caliptra_image_verify::{ImageVerificationInfo, ImageVerificationLogInfo, ImageVerifier};
 use caliptra_kat::KatsEnv;
 use caliptra_x509::{NotAfter, NotBefore};
+use core::mem::size_of;
 use core::mem::ManuallyDrop;
 use zerocopy::{AsBytes, LayoutVerified};
 use zeroize::Zeroize;
@@ -527,12 +528,24 @@ impl FirmwareProcessor {
             manifest.fmc.size
         );
 
-        let fmc_dest = unsafe {
-            let addr = (manifest.fmc.load_addr) as *mut u32;
-            core::slice::from_raw_parts_mut(addr, manifest.fmc.size as usize / 4)
-        };
 
-        txn.copy_request(fmc_dest.as_bytes_mut())?;
+
+        if ACTIVE_MODE {
+            let raw_image = txn.raw_mailbox_contents();
+
+            let fmc_dest = unsafe {
+                let addr = (manifest.fmc.load_addr) as *mut u8;
+                core::slice::from_raw_parts_mut(addr, manifest.fmc.size as usize)
+            };
+
+            fmc_dest.copy_from_slice(&raw_image[size_of::<ImageManifest>()..][..fmc_dest.len()]);
+        } else {
+            let fmc_dest = unsafe {
+                let addr = (manifest.fmc.load_addr) as *mut u32;
+                core::slice::from_raw_parts_mut(addr, manifest.fmc.size as usize / 4)
+            };
+            txn.copy_request(fmc_dest.as_bytes_mut())?;
+        }
 
         cprintln!(
             "[fwproc] Loading Runtime at address 0x{:08x} len {}",
@@ -540,12 +553,21 @@ impl FirmwareProcessor {
             manifest.runtime.size
         );
 
-        let runtime_dest = unsafe {
-            let addr = (manifest.runtime.load_addr) as *mut u32;
-            core::slice::from_raw_parts_mut(addr, manifest.runtime.size as usize / 4)
-        };
+        if ACTIVE_MODE {
+            let runtime_dest = unsafe {
+                let addr = (manifest.runtime.load_addr) as *mut u8;
+                core::slice::from_raw_parts_mut(addr, manifest.runtime.size as usize)
+            };
 
-        txn.copy_request(runtime_dest.as_bytes_mut())?;
+            let raw_image = txn.raw_mailbox_contents();
+            runtime_dest.copy_from_slice(&raw_image[size_of::<ImageManifest>() + manifest.fmc.size as usize..][..runtime_dest.len()]);
+        } else {
+            let runtime_dest = unsafe {
+                let addr = (manifest.runtime.load_addr) as *mut u32;
+                core::slice::from_raw_parts_mut(addr, manifest.runtime.size as usize / 4)
+            };
+            txn.copy_request(runtime_dest.as_bytes_mut())?;
+        }
 
         report_boot_status(FwProcessorLoadImageComplete.into());
         Ok(())

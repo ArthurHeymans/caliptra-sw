@@ -277,9 +277,9 @@ fn main() -> io::Result<()> {
             _ => print!("{}", val as char),
         }),
         ready_for_fw_cb: ReadyForFwCb::new(move |args| {
-            let firmware_buffer = current_fw_buf.clone();
+//            let firmware_buffer = current_fw_buf.clone();
             args.schedule_later(FW_WRITE_TICKS, move |mailbox: &mut MailboxInternal| {
-                upload_fw_to_mailbox(mailbox, firmware_buffer);
+                upload_fw_to_mailbox(mailbox, Rc::new(vec![]));
 
             });
         }),
@@ -300,7 +300,7 @@ fn main() -> io::Result<()> {
     };
 
     let mut root_bus = CaliptraRootBus::new(&clock, bus_args);
-    root_bus.recovery.cms_data = Some(recovery_img);
+    root_bus.recovery.cms_data = Some(recovery_img.clone());
     let soc_ifc = unsafe {
         caliptra_registers::soc_ifc::RegisterBlock::new_with_mmio(
             0x3003_0000 as *mut u32,

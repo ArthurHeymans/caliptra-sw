@@ -267,7 +267,7 @@ impl DmaRegs {
 
         data.chunks(RvSize::Word as usize).for_each(|c| {
             mailbox_regs
-                .write_din(RvSize::Word, u32::from_ne_bytes(c.try_into().unwrap()))
+                .write_din(RvSize::Word, u32::from_le_bytes(c.try_into().unwrap()))
                 .unwrap()
         });
     }
@@ -277,11 +277,11 @@ impl DmaRegs {
         let read_addr_fixed = self.control.reg.is_set(Control::READ_ADDR_FIXED);
         let read_addr = self.src_addr_l.reg.get();
         assert_eq!(self.src_addr_h.reg.get(), 0); // 32bit
-        let read_data: Vec<u8> =
+        let read_data =
                 // Special case for putting stuff image in the mailbox from recovery register interface
                 if read_addr == Self::RRI_BASE + Self::RRI_FIFO_OFFSET && read_addr_fixed {
-                    if let Some(data) = &root_bus.recovery.cms_data {
-                        data.clone().to_vec()
+                    if let Some(data) = root_bus.recovery.cms_data.clone() {
+                        (*data).clone()
                     } else {
                         vec![]
                     }
@@ -296,7 +296,6 @@ impl DmaRegs {
                                 .unwrap()
                                 .to_le_bytes()
                         }).collect()
-
                 };
         match self.control.reg.read_as_enum(Control::READ_ROUTE) {
             Some(Control::READ_ROUTE::Value::MAILBOX) => {
@@ -381,6 +380,6 @@ mod tests {
         let mut dma = Dma::new(&clock);
 
         let capabilities = dma.read(RvSize::Word, CAPABILITIES_OFFSET).unwrap();
-        assert_eq!(capabilities, 0x1000);
+        assert_eq!(capabilities, 0xfff);
     }
 }

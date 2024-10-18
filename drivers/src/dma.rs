@@ -19,6 +19,7 @@ use caliptra_registers::axi_dma::{
 };
 use zerocopy::AsBytes;
 
+const RRI_BASE: u32 = 0x1003_8000;
 const PROT_CAP_OFFSET: u32 = 0x0;
 const INDIRECT_FIFO_DATA_OFFSET: u32 = PROT_CAP_OFFSET + 0x6C;
 
@@ -242,7 +243,7 @@ impl Dma {
         dma_reg.block_size().write(|bs| bs.size(256));
 
         // Write the source address to SA(L) and SA(H) registers.
-        dma_reg.src_addr_l().write(|_| INDIRECT_FIFO_DATA_OFFSET);
+        dma_reg.src_addr_l().write(|_| RRI_BASE + INDIRECT_FIFO_DATA_OFFSET);
         dma_reg.src_addr_h().write(|_| 0);
 
         // Write Control register.

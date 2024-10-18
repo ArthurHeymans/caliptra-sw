@@ -406,7 +406,7 @@ mod tests {
             .unwrap();
 
         let image_size = rri.read(RvSize::Word, INDIRECT_FIFO_IMAGE_SIZE).unwrap();
-        assert_eq!(image_len, image_size.try_into().unwrap());
+        assert_eq!(image_len, image_size as usize * 4);
 
         let mut read_image = Vec::new();
         while rri.read(RvSize::Word, INDIRECT_FIFO_STATUS).unwrap() & 1 == 0 {
