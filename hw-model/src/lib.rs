@@ -173,6 +173,17 @@ impl TrngMode {
 
 const EXPECTED_CALIPTRA_BOOT_TIME_IN_CYCLES: u64 = 40_000_000; // 40 million cycles
 
+/// Parameters for encrypted MCU firmware boot
+#[derive(Clone, Default)]
+pub struct EncryptedMcuFwParams {
+    /// AES-256 key for decrypting the MCU firmware
+    pub key: [u8; 32],
+    /// AES-GCM IV (12 bytes)
+    pub iv: [u8; 12],
+    /// AES-GCM authentication tag (16 bytes)
+    pub tag: [u8; 16],
+}
+
 pub struct SubsystemInitParams<'a> {
     // Optionally, provide MCU ROM for normal boot; otherwise use the pre-built ROM image from
     // CPTRA_MCU_ROM env var
@@ -185,6 +196,11 @@ pub struct SubsystemInitParams<'a> {
     // Whether to use encrypted boot mode (loads mcu_rom_encrypted instead of mcu_rom)
     // When true, the MCU ROM should send RI_DOWNLOAD_ENCRYPTED_FIRMWARE instead of RI_DOWNLOAD_FIRMWARE
     pub encrypted_boot: bool,
+
+    // Parameters for encrypted MCU firmware (key, IV, tag)
+    // When encrypted_boot is true, the hw-model will use these to decrypt the MCU firmware
+    // after sending RI_DOWNLOAD_ENCRYPTED_FIRMWARE
+    pub encrypted_mcu_fw_params: Option<EncryptedMcuFwParams>,
 
     // Consume MCU UART log with Caliptra UART log
     pub enable_mcu_uart_log: bool,
@@ -209,7 +225,8 @@ impl Default for SubsystemInitParams<'_> {
         Self {
             mcu_rom: Default::default(),
             mcu_rom_encrypted: Default::default(),
-            encrypted_boot: true,
+            encrypted_boot: false,
+            encrypted_mcu_fw_params: None,
             enable_mcu_uart_log: Default::default(),
             rma_or_scrap_ppd: Default::default(),
             raw_unlock_token_hash: [0xf0930a4d, 0xde8a30e6, 0xd1c8cbba, 0x896e4a11],
@@ -659,10 +676,10 @@ fn mbox_read_fifo(mbox: mbox::RegisterBlock<impl MmioMut>) -> Vec<u8> {
 const FW_LOAD_CMD_OPCODE: u32 = 0x4657_4C44;
 
 /// The download firmware from recovery interface Opcode
-const RI_DOWNLOAD_FIRMWARE_OPCODE: u32 = 0x5249_4644;
+pub(crate) const RI_DOWNLOAD_FIRMWARE_OPCODE: u32 = 0x5249_4644;
 
 /// The download encrypted firmware from recovery interface Opcode
-const RI_DOWNLOAD_ENCRYPTED_FIRMWARE_OPCODE: u32 = 0x5249_4645;
+pub(crate) const RI_DOWNLOAD_ENCRYPTED_FIRMWARE_OPCODE: u32 = 0x5249_4645;
 
 /// Stash Measurement Command Opcode.
 const STASH_MEASUREMENT_CMD_OPCODE: u32 = 0x4D45_4153;

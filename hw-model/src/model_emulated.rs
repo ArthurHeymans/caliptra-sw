@@ -43,6 +43,13 @@ use crate::ModelError;
 use crate::Output;
 use crate::TrngMode;
 
+use caliptra_api::mailbox::{
+    CmAesGcmDecryptDmaReq, CmAesGcmDecryptDmaResp, CmImportReq, CmImportResp, CmKeyUsage,
+    CommandId, MailboxReq, MailboxReqHeader, MailboxRespHeader,
+};
+use sha2::{Digest, Sha384};
+use zerocopy::FromBytes;
+
 pub struct EmulatedApbBus<'a> {
     model: &'a mut ModelEmulated,
 }
@@ -87,6 +94,15 @@ pub struct ModelEmulated {
     collected_events_from_caliptra: Vec<Event>,
 
     pub mci: Mci,
+
+    // Whether to use encrypted boot mode (sends RI_DOWNLOAD_ENCRYPTED_FIRMWARE instead of RI_DOWNLOAD_FIRMWARE)
+    encrypted_boot: bool,
+
+    // Parameters for encrypted MCU firmware decryption (if encrypted_boot is true)
+    encrypted_mcu_fw_params: Option<crate::EncryptedMcuFwParams>,
+
+    // Length of the MCU firmware (needed for decrypt command)
+    mcu_fw_len: usize,
 }
 
 #[cfg(feature = "coverage")]
@@ -266,6 +282,9 @@ impl HwModel for ModelEmulated {
             events_from_caliptra,
             collected_events_from_caliptra: vec![],
             mci: mci_regs,
+            encrypted_boot: params.ss_init_params.encrypted_boot,
+            encrypted_mcu_fw_params: params.ss_init_params.encrypted_mcu_fw_params.clone(),
+            mcu_fw_len: 0,
         };
         // Turn tracing on if the trace path was set
         m.tracing_hint(true);
@@ -480,5 +499,172 @@ impl HwModel for ModelEmulated {
 
     fn set_fuses(&mut self, fuses: Fuses) {
         self.fuses = fuses;
+    }
+
+    fn upload_firmware_rri(
+        &mut self,
+        firmware: &[u8],
+        soc_manifest: Option<&[u8]>,
+        mcu_firmware: Option<&[u8]>,
+    ) -> Result<(), ModelError> {
+        // Store MCU firmware length for later use in decrypt flow
+        self.mcu_fw_len = mcu_firmware.map(|fw| fw.len()).unwrap_or(0);
+
+        self.put_firmware_in_rri(firmware, soc_manifest, mcu_firmware)?;
+        let opcode = if self.encrypted_boot {
+            crate::RI_DOWNLOAD_ENCRYPTED_FIRMWARE_OPCODE
+        } else {
+            crate::RI_DOWNLOAD_FIRMWARE_OPCODE
+        };
+        let response = self.mailbox_execute(opcode, &[])?;
+        if response.is_some() {
+            return Err(ModelError::UploadFirmwareUnexpectedResponse);
+        }
+
+        // If encrypted boot with encryption params, handle decrypt and activate
+        if self.encrypted_boot {
+            if let Some(params) = self.encrypted_mcu_fw_params.clone() {
+                self.handle_encrypted_boot_flow(mcu_firmware.unwrap_or(&[]), &params)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn upload_firmware_rri_encrypted(
+        &mut self,
+        firmware: &[u8],
+        soc_manifest: Option<&[u8]>,
+        mcu_firmware: Option<&[u8]>,
+    ) -> Result<(), ModelError> {
+        // Delegate to upload_firmware_rri which uses self.encrypted_boot internally
+        // This makes ss_init_params.encrypted_boot the source of truth
+        self.upload_firmware_rri(firmware, soc_manifest, mcu_firmware)
+    }
+}
+
+impl ModelEmulated {
+    /// Handle the encrypted boot flow: wait for RT, import key, decrypt MCU FW
+    /// Note: ACTIVATE_FIRMWARE is skipped for the sw-emulated model since there's no real MCU
+    fn handle_encrypted_boot_flow(
+        &mut self,
+        encrypted_mcu_fw: &[u8],
+        params: &crate::EncryptedMcuFwParams,
+    ) -> Result<(), ModelError> {
+        const RT_READY_FOR_COMMANDS: u32 = 0x600;
+
+        // Wait for RT to be ready for mailbox commands
+        self.step_until_boot_status(RT_READY_FOR_COMMANDS, true);
+
+        // 1. Import the AES key to get a CMK
+        let cmk = self.import_aes_key(&params.key)?;
+
+        // 2. Compute SHA384 of encrypted data
+        let mut hasher = Sha384::new();
+        hasher.update(encrypted_mcu_fw);
+        let encrypted_sha384: [u8; 48] = hasher.finalize().into();
+
+        // 3. Get MCU SRAM address where firmware was placed by recovery flow
+        let mcu_sram_addr = AxiRootBus::mcu_sram_offset();
+
+        // 4. Send CM_AES_GCM_DECRYPT_DMA
+        self.decrypt_mcu_firmware(
+            &cmk,
+            params,
+            &encrypted_sha384,
+            mcu_sram_addr,
+            encrypted_mcu_fw.len(),
+        )?;
+
+        // Note: ACTIVATE_FIRMWARE is not sent for sw-emulated model because:
+        // - There's no real MCU hardware to activate
+        // - The firmware has been decrypted in-place in MCU SRAM
+        // - For FPGA, the MCU ROM sends ACTIVATE_FIRMWARE
+
+        Ok(())
+    }
+
+    /// Import an AES key and return the CMK
+    fn import_aes_key(&mut self, key: &[u8; 32]) -> Result<caliptra_api::mailbox::Cmk, ModelError> {
+        let mut input = [0u8; 64];
+        input[..32].copy_from_slice(key);
+
+        let mut cm_import_cmd = MailboxReq::CmImport(CmImportReq {
+            hdr: MailboxReqHeader { chksum: 0 },
+            key_usage: CmKeyUsage::Aes.into(),
+            input_size: 32,
+            input,
+        });
+        cm_import_cmd.populate_chksum().unwrap();
+
+        let resp = self
+            .mailbox_execute(
+                u32::from(CommandId::CM_IMPORT),
+                cm_import_cmd.as_bytes().unwrap(),
+            )?
+            .ok_or(ModelError::MailboxNoResponseData)?;
+
+        let cm_import_resp = CmImportResp::ref_from_bytes(resp.as_slice())
+            .map_err(|_| ModelError::MailboxRespTypeTooSmall)?;
+        if cm_import_resp.hdr.fips_status != MailboxRespHeader::FIPS_STATUS_APPROVED {
+            return Err(ModelError::MailboxRespInvalidFipsStatus(
+                cm_import_resp.hdr.fips_status,
+            ));
+        }
+        Ok(cm_import_resp.cmk.clone())
+    }
+
+    /// Decrypt MCU firmware in MCU SRAM using CM_AES_GCM_DECRYPT_DMA
+    fn decrypt_mcu_firmware(
+        &mut self,
+        cmk: &caliptra_api::mailbox::Cmk,
+        params: &crate::EncryptedMcuFwParams,
+        encrypted_sha384: &[u8; 48],
+        mcu_sram_addr: u64,
+        length: usize,
+    ) -> Result<(), ModelError> {
+        // Convert IV and tag to u32 arrays (little-endian)
+        let iv: [u32; 3] = [
+            u32::from_le_bytes(params.iv[0..4].try_into().unwrap()),
+            u32::from_le_bytes(params.iv[4..8].try_into().unwrap()),
+            u32::from_le_bytes(params.iv[8..12].try_into().unwrap()),
+        ];
+        let tag: [u32; 4] = [
+            u32::from_le_bytes(params.tag[0..4].try_into().unwrap()),
+            u32::from_le_bytes(params.tag[4..8].try_into().unwrap()),
+            u32::from_le_bytes(params.tag[8..12].try_into().unwrap()),
+            u32::from_le_bytes(params.tag[12..16].try_into().unwrap()),
+        ];
+
+        let decrypt_req = CmAesGcmDecryptDmaReq {
+            hdr: MailboxReqHeader { chksum: 0 },
+            cmk: cmk.clone(),
+            iv,
+            tag,
+            encrypted_data_sha384: *encrypted_sha384,
+            axi_addr_lo: mcu_sram_addr as u32,
+            axi_addr_hi: (mcu_sram_addr >> 32) as u32,
+            length: length as u32,
+            aad_length: 0,
+            aad: [0u8; caliptra_api::mailbox::CM_AES_GCM_DECRYPT_DMA_MAX_AAD_SIZE],
+        };
+
+        let mut decrypt_cmd = MailboxReq::CmAesGcmDecryptDma(decrypt_req);
+        decrypt_cmd.populate_chksum().unwrap();
+
+        let resp = self
+            .mailbox_execute(
+                u32::from(CommandId::CM_AES_GCM_DECRYPT_DMA),
+                decrypt_cmd.as_bytes().unwrap(),
+            )?
+            .ok_or(ModelError::MailboxNoResponseData)?;
+
+        let decrypt_resp = CmAesGcmDecryptDmaResp::ref_from_bytes(resp.as_slice())
+            .map_err(|_| ModelError::MailboxRespTypeTooSmall)?;
+        if decrypt_resp.tag_verified != 1 {
+            return Err(ModelError::MailboxCmdFailed(0)); // GCM tag verification failed
+        }
+
+        Ok(())
     }
 }

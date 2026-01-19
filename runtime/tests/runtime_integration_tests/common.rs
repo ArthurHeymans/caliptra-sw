@@ -101,6 +101,9 @@ pub struct RuntimeTestArgs<'a> {
     pub rom_callback: Option<ModelCallback>,
     /// Use encrypted firmware boot (RI_DOWNLOAD_ENCRYPTED_FIRMWARE instead of RI_DOWNLOAD_FIRMWARE)
     pub encrypted_boot: bool,
+    /// Encryption parameters for MCU firmware (key, IV, tag)
+    /// When provided with encrypted_boot=true, the hw-model will automatically decrypt and activate
+    pub encrypted_mcu_fw_params: Option<caliptra_hw_model::EncryptedMcuFwParams>,
 }
 
 impl RuntimeTestArgs<'_> {
@@ -147,6 +150,7 @@ impl Default for RuntimeTestArgs<'_> {
             key_type: None,
             rom_callback: None,
             encrypted_boot: false,
+            encrypted_mcu_fw_params: None,
         }
     }
 }
@@ -264,6 +268,9 @@ pub fn start_rt_test_pqc_model(
         rom_callback: args.rom_callback,
         ..Default::default()
     });
+    // Always override encrypted_boot and encrypted_mcu_fw_params from args to ensure consistency
+    init_params.ss_init_params.encrypted_boot = args.encrypted_boot;
+    init_params.ss_init_params.encrypted_mcu_fw_params = args.encrypted_mcu_fw_params.clone();
     init_params.fuses = Fuses {
         fuse_pqc_key_type: pqc_key_type as u32,
         vendor_pk_hash,

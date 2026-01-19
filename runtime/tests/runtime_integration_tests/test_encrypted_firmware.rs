@@ -6,20 +6,20 @@ use crate::common::{run_rt_test, RuntimeTestArgs};
 use crate::test_set_auth_manifest::create_auth_manifest_with_metadata;
 use aes_gcm::{aead::AeadMutInPlace, Key, KeyInit};
 use caliptra_api::mailbox::{
-    CmAesGcmDecryptDmaReq, CmAesGcmDecryptDmaResp, CmImportReq, CmImportResp, CmKeyUsage, Cmk,
-    CommandId, MailboxReq, MailboxReqHeader, MailboxRespHeader,
+    CmAesGcmDecryptDmaReq, CmImportReq, CmImportResp, CmKeyUsage, Cmk, CommandId, MailboxReq,
+    MailboxReqHeader, MailboxRespHeader,
 };
 use caliptra_auth_man_types::{AuthManifestImageMetadata, ImageMetadataFlags};
-use caliptra_hw_model::{HwModel, InitParams};
+use caliptra_hw_model::{EncryptedMcuFwParams, HwModel, InitParams};
 use caliptra_image_crypto::OsslCrypto as Crypto;
 use caliptra_image_gen::from_hw_format;
 use caliptra_image_gen::ImageGeneratorCrypto;
-use sha2::{Digest, Sha384};
-use zerocopy::{transmute, FromBytes, IntoBytes};
+use zerocopy::{FromBytes, IntoBytes};
 
 const RT_READY_FOR_COMMANDS: u32 = 0x600;
 
 /// Import a raw AES key and return the CMK
+#[allow(dead_code)]
 fn import_aes_key(model: &mut caliptra_hw_model::DefaultHwModel, key: &[u8; 32]) -> Cmk {
     let mut input = [0u8; 64];
     input[..32].copy_from_slice(key);
@@ -64,19 +64,11 @@ fn aes_gcm_encrypt(
     (ciphertext, tag.into())
 }
 
-/// Test that the encrypted firmware flow works correctly:
+/// Test that the encrypted firmware flow works correctly with hw-model handling decrypt/activate:
 /// 1. Boot with RI_DOWNLOAD_ENCRYPTED_FIRMWARE
-/// 2. Import an AES key via CM_IMPORT
-/// 3. Use CM_AES_GCM_DECRYPT_DMA to decrypt the MCU firmware in MCU SRAM
-/// 4. Verify the decrypted firmware matches the original plaintext
-#[cfg_attr(
-    any(
-        feature = "verilator",
-        feature = "fpga_realtime",
-        feature = "fpga_subsystem"
-    ),
-    ignore
-)]
+/// 2. hw-model automatically imports AES key, decrypts via CM_AES_GCM_DECRYPT_DMA, and activates
+/// 3. Verify the decrypted firmware matches the original plaintext
+#[cfg_attr(any(feature = "verilator", feature = "fpga_realtime",), ignore)]
 #[test]
 fn test_encrypted_firmware_decrypt_dma() {
     // The plaintext MCU firmware
@@ -92,15 +84,12 @@ fn test_encrypted_firmware_decrypt_dma() {
     // Encrypt the MCU firmware
     let (mcu_fw_encrypted, tag) = aes_gcm_encrypt(&aes_key, &iv, &aad, &mcu_fw_plaintext);
 
-    // Compute SHA384 of encrypted data (required by CM_AES_GCM_DECRYPT_DMA)
-    let mut hasher = Sha384::new();
-    hasher.update(&mcu_fw_encrypted);
-    let encrypted_sha384: [u8; 48] = hasher.finalize().into();
-
     // Create SoC manifest with the encrypted MCU firmware digest
     const IMAGE_SOURCE_IN_REQUEST: u32 = 1;
+    const MCU_EXEC_BIT: u32 = 2; // exec_bit must be > 1 and <= 127
     let mut flags = ImageMetadataFlags(0);
     flags.set_image_source(IMAGE_SOURCE_IN_REQUEST);
+    flags.set_exec_bit(MCU_EXEC_BIT);
     let crypto = Crypto::default();
     // Use the digest of the ENCRYPTED firmware in the manifest
     // (since the manifest is checked before decryption)
@@ -114,7 +103,15 @@ fn test_encrypted_firmware_decrypt_dma() {
     let soc_manifest = create_auth_manifest_with_metadata(metadata);
     let soc_manifest_bytes = soc_manifest.as_bytes();
 
-    // Use the standard test infrastructure with encrypted_boot flag
+    // Create encryption parameters for hw-model to use
+    let encryption_params = EncryptedMcuFwParams {
+        key: aes_key,
+        iv,
+        tag,
+    };
+
+    // Use the standard test infrastructure with encrypted_boot flag and encryption params
+    // The hw-model will automatically handle decrypt and activate
     let rom = crate::common::rom_for_fw_integration_tests().unwrap();
     let args = RuntimeTestArgs {
         init_params: Some(InitParams {
@@ -125,51 +122,12 @@ fn test_encrypted_firmware_decrypt_dma() {
         soc_manifest: Some(soc_manifest_bytes),
         mcu_fw_image: Some(&mcu_fw_encrypted),
         encrypted_boot: true,
+        encrypted_mcu_fw_params: Some(encryption_params),
         ..Default::default()
     };
 
+    // run_rt_test will handle: RI_DOWNLOAD_ENCRYPTED_FIRMWARE, CM_IMPORT, CM_AES_GCM_DECRYPT_DMA, ACTIVATE_FIRMWARE
     let mut model = run_rt_test(args);
-    model.step_until_boot_status(RT_READY_FOR_COMMANDS, true);
-
-    // Import the AES key to get a CMK
-    let cmk = import_aes_key(&mut model, &aes_key);
-
-    // Get the MCU SRAM address where the encrypted firmware is stored
-    // write_payload_to_ss_staging_area returns this address, so we can use a dummy call
-    // to get the address value, or we can use the constant offset from MCI base
-    // Since write_payload_to_ss_staging_area returns the MCU SRAM address, we can use
-    // it to get the address (it will overwrite but we'll restore later)
-    let mcu_sram_addr = model
-        .write_payload_to_ss_staging_area(&mcu_fw_encrypted)
-        .expect("Failed to get MCU SRAM address");
-
-    // Build the CM_AES_GCM_DECRYPT_DMA request
-    let decrypt_req = CmAesGcmDecryptDmaReq {
-        hdr: MailboxReqHeader { chksum: 0 },
-        cmk,
-        iv: transmute!(iv),
-        tag: transmute!(tag),
-        encrypted_data_sha384: encrypted_sha384,
-        axi_addr_lo: mcu_sram_addr as u32,
-        axi_addr_hi: (mcu_sram_addr >> 32) as u32,
-        length: mcu_fw_encrypted.len() as u32,
-        aad_length: 0,
-        aad: [0u8; caliptra_api::mailbox::CM_AES_GCM_DECRYPT_DMA_MAX_AAD_SIZE],
-    };
-
-    let mut decrypt_cmd = MailboxReq::CmAesGcmDecryptDma(decrypt_req);
-    decrypt_cmd.populate_chksum().unwrap();
-
-    let resp = model
-        .mailbox_execute(
-            u32::from(CommandId::CM_AES_GCM_DECRYPT_DMA),
-            decrypt_cmd.as_bytes().unwrap(),
-        )
-        .unwrap()
-        .expect("We should have received a response");
-
-    let decrypt_resp = CmAesGcmDecryptDmaResp::ref_from_bytes(resp.as_slice()).unwrap();
-    assert_eq!(decrypt_resp.tag_verified, 1, "GCM tag verification failed");
 
     // Read back the decrypted firmware from MCU SRAM
     let decrypted_fw = model
@@ -184,14 +142,7 @@ fn test_encrypted_firmware_decrypt_dma() {
 }
 
 /// Test that CM_AES_GCM_DECRYPT_DMA fails when not in encrypted firmware mode
-#[cfg_attr(
-    any(
-        feature = "verilator",
-        feature = "fpga_realtime",
-        feature = "fpga_subsystem"
-    ),
-    ignore
-)]
+#[cfg_attr(any(feature = "verilator", feature = "fpga_realtime",), ignore)]
 #[test]
 fn test_decrypt_dma_fails_in_normal_mode() {
     // Create a simple MCU firmware
