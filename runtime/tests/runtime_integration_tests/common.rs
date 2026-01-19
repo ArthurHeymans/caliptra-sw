@@ -258,6 +258,7 @@ pub fn start_rt_test_pqc_model(
         ocp_lock_en: args.ocp_lock_en || cfg!(feature = "ocp-lock"),
         ss_init_params: SubsystemInitParams {
             enable_mcu_uart_log: args.subsystem_mode,
+            encrypted_boot: args.encrypted_boot,
             ..Default::default()
         },
         rom_callback: args.rom_callback,

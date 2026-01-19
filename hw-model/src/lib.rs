@@ -174,8 +174,17 @@ impl TrngMode {
 const EXPECTED_CALIPTRA_BOOT_TIME_IN_CYCLES: u64 = 40_000_000; // 40 million cycles
 
 pub struct SubsystemInitParams<'a> {
-    // Optionally, provide MCU ROM; otherwise use the pre-built ROM image, if needed
+    // Optionally, provide MCU ROM for normal boot; otherwise use the pre-built ROM image from
+    // CPTRA_MCU_ROM env var
     pub mcu_rom: Option<&'a [u8]>,
+
+    // Optionally, provide MCU ROM for encrypted boot; otherwise use the pre-built ROM image from
+    // CPTRA_MCU_ROM_ENCRYPTED env var (falls back to CPTRA_MCU_ROM if not set)
+    pub mcu_rom_encrypted: Option<&'a [u8]>,
+
+    // Whether to use encrypted boot mode (loads mcu_rom_encrypted instead of mcu_rom)
+    // When true, the MCU ROM should send RI_DOWNLOAD_ENCRYPTED_FIRMWARE instead of RI_DOWNLOAD_FIRMWARE
+    pub encrypted_boot: bool,
 
     // Consume MCU UART log with Caliptra UART log
     pub enable_mcu_uart_log: bool,
@@ -199,6 +208,8 @@ impl Default for SubsystemInitParams<'_> {
     fn default() -> Self {
         Self {
             mcu_rom: Default::default(),
+            mcu_rom_encrypted: Default::default(),
+            encrypted_boot: false,
             enable_mcu_uart_log: Default::default(),
             rma_or_scrap_ppd: Default::default(),
             raw_unlock_token_hash: [0xf0930a4d, 0xde8a30e6, 0xd1c8cbba, 0x896e4a11],

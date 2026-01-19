@@ -1545,14 +1545,30 @@ impl HwModel for ModelFpgaSubsystem {
         if let Some(TrngMode::External) = params.trng_mode {
             return Err("External TRNG mode is not supported in ModelFpgaSubsystem".into());
         }
-        let mcu_rom =
+
+        // Select the appropriate MCU ROM based on encrypted_boot flag
+        let mcu_rom = if params.ss_init_params.encrypted_boot {
+            // Encrypted boot mode: use mcu_rom_encrypted or CPTRA_MCU_ROM_ENCRYPTED env var
+            match params.ss_init_params.mcu_rom_encrypted {
+                Some(mcu_rom) => mcu_rom,
+                None => {
+                    // Try CPTRA_MCU_ROM_ENCRYPTED first, fall back to CPTRA_MCU_ROM
+                    let rom_path = std::env::var("CPTRA_MCU_ROM_ENCRYPTED")
+                        .or_else(|_| std::env::var("CPTRA_MCU_ROM"))
+                        .expect("set the ENV VAR CPTRA_MCU_ROM_ENCRYPTED or CPTRA_MCU_ROM to the absolute path of caliptra-mcu rom");
+                    &std::fs::read(rom_path).expect("couldn't read MCU ROM for encrypted boot")
+                }
+            }
+        } else {
+            // Normal boot mode: use mcu_rom or CPTRA_MCU_ROM env var
             match params.ss_init_params.mcu_rom {
                 Some(mcu_rom) => mcu_rom,
                 None => &std::fs::read(std::env::var("CPTRA_MCU_ROM").expect(
                     "set the ENV VAR CPTRA_MCU_ROM to the absolute path of caliptra-mcu rom",
                 ))
                 .expect("couldn't read CPTRA_MCU_ROM"),
-            };
+            }
+        };
 
         let output = Output::new(params.log_writer);
         let dev0 = UioDevice::blocking_new(0)?;
