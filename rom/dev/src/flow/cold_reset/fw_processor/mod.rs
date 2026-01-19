@@ -348,7 +348,10 @@ impl FirmwareProcessor {
                     }
 
                     // Complete the command indicating success
-                    cprintln!("[fwproc] Completing RI_DOWNLOAD_FIRMWARE command");
+                    cprintln!(
+                        "[fwproc] Completing {}RI_DOWNLOAD_FIRMWARE command",
+                        if encrypted { "ENCRYPTED_" } else { "" }
+                    );
                     let txn = mbox
                         .peek_recv()
                         .ok_or(CaliptraError::FW_PROC_MAILBOX_STATE_INCONSISTENT)?;
