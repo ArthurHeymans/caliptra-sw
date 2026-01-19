@@ -209,7 +209,7 @@ impl Default for SubsystemInitParams<'_> {
         Self {
             mcu_rom: Default::default(),
             mcu_rom_encrypted: Default::default(),
-            encrypted_boot: false,
+            encrypted_boot: true,
             enable_mcu_uart_log: Default::default(),
             rma_or_scrap_ppd: Default::default(),
             raw_unlock_token_hash: [0xf0930a4d, 0xde8a30e6, 0xd1c8cbba, 0x896e4a11],
