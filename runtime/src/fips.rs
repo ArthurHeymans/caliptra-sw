@@ -177,6 +177,11 @@ pub mod fips_self_test_cmd {
         };
 
         caliptra_kat::execute_kat(&mut kats_env)?;
+
+        // Note: AES KATs are run lazily on first use of each AES mode.
+        // This ensures that only the KATs for actually-used AES modes
+        // are linked into the binary, reducing code size.
+
         Ok(())
     }
 

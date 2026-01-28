@@ -4,7 +4,7 @@ Licensed under the Apache-2.0 license.
 
 File Name:
 
-    aes256gcm_kat.rs
+    aes256cbc_kat.rs
 
 Abstract:
 
@@ -34,40 +34,31 @@ const CT: [u8; 48] = [
     0x8b, 0x70, 0xc5, 0x15, 0xa6, 0x66, 0x3d, 0x38, 0xcd, 0xb8, 0xe6, 0x53, 0x2b, 0x26, 0x64, 0x91,
 ];
 
-#[derive(Default, Debug)]
-pub struct Aes256CbcKat {}
+/// Execute the Known Answer Tests (aka KAT) for AES-256-CBC.
+///
+/// Test vector source:
+/// NIST test vectors
+///
+/// # Arguments
+///
+/// * `aes` - AES driver
+///
+/// # Returns
+///
+/// * `CaliptraResult` - Result denoting the KAT outcome.
+pub fn execute_cbc_kat(aes: &mut Aes) -> CaliptraResult<()> {
+    let mut ciphertext: [u8; 48] = [0u8; 48];
+    aes.aes_256_cbc(&KEY, &IV, AesOperation::Encrypt, &PT[..], &mut ciphertext)?;
 
-impl Aes256CbcKat {
-    /// This function executes the Known Answer Tests (aka KAT) for AES-256-CBC.
-    ///
-    /// Test vector source:
-    /// NIST test vectors
-    ///
-    /// # Arguments
-    ///
-    /// * `aes` - AES driver
-    ///
-    /// # Returns
-    ///
-    /// * `CaliptraResult` - Result denoting the KAT outcome.
-    pub fn execute(&self, aes: &mut Aes) -> CaliptraResult<()> {
-        self.encrypt_decrypt(aes)
+    if ciphertext != CT {
+        Err(CaliptraError::KAT_AES_CIPHERTEXT_MISMATCH)?;
     }
 
-    fn encrypt_decrypt(&self, aes: &mut Aes) -> CaliptraResult<()> {
-        let mut ciphertext: [u8; 48] = [0u8; 48];
-        aes.aes_256_cbc(&KEY, &IV, AesOperation::Encrypt, &PT[..], &mut ciphertext)?;
-
-        if ciphertext != CT {
-            Err(CaliptraError::KAT_AES_CIPHERTEXT_MISMATCH)?;
-        }
-
-        let mut plaintext: [u8; 48] = [0u8; 48];
-        aes.aes_256_cbc(&KEY, &IV, AesOperation::Decrypt, &CT[..], &mut plaintext)?;
-        if plaintext != PT {
-            Err(CaliptraError::KAT_AES_PLAINTEXT_MISMATCH)?;
-        }
-
-        Ok(())
+    let mut plaintext: [u8; 48] = [0u8; 48];
+    aes.aes_256_cbc(&KEY, &IV, AesOperation::Decrypt, &CT[..], &mut plaintext)?;
+    if plaintext != PT {
+        Err(CaliptraError::KAT_AES_PLAINTEXT_MISMATCH)?;
     }
+
+    Ok(())
 }

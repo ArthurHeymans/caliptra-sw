@@ -129,9 +129,6 @@ impl FirmwareProcessor {
             // Ecc384 Engine
             ecc384: &mut env.ecc384,
 
-            // AES Engine
-            aes: &mut env.aes,
-
             // SHA Acc lock state
             sha_acc_lock_state: ShaAccLockState::NotAcquired,
         };
@@ -141,6 +138,7 @@ impl FirmwareProcessor {
             &mut env.mbox,
             &mut env.pcr_bank,
             &mut env.dma,
+            &mut env.aes_gcm,
             &mut kats_env,
             env.persistent_data.get_mut(),
         )?;
@@ -271,6 +269,7 @@ impl FirmwareProcessor {
         mbox: &'a mut Mailbox,
         pcr_bank: &mut PcrBank,
         dma: &mut Dma,
+        aes_gcm: &mut AesGcm,
         env: &mut KatsEnv,
         persistent_data: &mut PersistentData,
     ) -> CaliptraResult<(Option<ManuallyDrop<MailboxRecvTxn<'a>>>, u32)> {
@@ -420,7 +419,7 @@ impl FirmwareProcessor {
                     }
                     CommandId::CM_DERIVE_STABLE_KEY => CmDeriveStableKeyCmd::execute(
                         cmd_bytes,
-                        env.aes,
+                        aes_gcm,
                         env.hmac,
                         env.trng,
                         persistent_data,
@@ -431,7 +430,7 @@ impl FirmwareProcessor {
                     }
                     CommandId::CM_HMAC => CmHmacCmd::execute(
                         cmd_bytes,
-                        env.aes,
+                        aes_gcm,
                         env.hmac,
                         env.trng,
                         persistent_data,
@@ -1101,8 +1100,8 @@ impl FirmwareProcessor {
         dma_recovery.download_image_to_mcu(FW_IMAGE_INDEX, AesDmaMode::None)
     }
 
-    pub(crate) fn derive_stable_key(
-        aes: &mut Aes,
+    pub(crate) fn derive_stable_key<A: AesCmacOp + AesGcmOp>(
+        aes: &mut A,
         hmac: &mut Hmac,
         trng: &mut Trng,
         persistent_data: &mut PersistentData,

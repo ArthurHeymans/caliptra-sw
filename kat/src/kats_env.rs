@@ -1,8 +1,9 @@
 // Licensed under the Apache-2.0 license
 
+#[cfg(not(feature = "rom"))]
+use caliptra_drivers::Aes;
 use caliptra_drivers::{
-    Aes, Ecc384, Hmac, Lms, Mldsa87, Sha256, Sha2_512_384, Sha2_512_384Acc, Sha3, ShaAccLockState,
-    Trng,
+    Ecc384, Hmac, Lms, Mldsa87, Sha256, Sha2_512_384, Sha2_512_384Acc, Sha3, ShaAccLockState, Trng,
 };
 
 pub struct KatsEnv<'a> {
@@ -36,7 +37,7 @@ pub struct KatsEnv<'a> {
     /// MLDSA Engine
     pub mldsa87: &'a mut Mldsa87,
 
-    /// AES Engine
-    //#[cfg(feature = "runtime")]
+    /// AES Engine (not available for ROM - ROM uses AesGcm directly)
+    #[cfg(not(feature = "rom"))]
     pub aes: &'a mut Aes,
 }
