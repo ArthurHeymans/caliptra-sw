@@ -12,7 +12,7 @@ Abstract:
 
 --*/
 
-use caliptra_drivers::{Aes, AesKey, AesOperation, CaliptraError, CaliptraResult, LEArray4x8};
+use crate::{Aes, AesKey, AesOperation, CaliptraError, CaliptraResult, LEArray4x8};
 
 // Generated from Python code:
 // >>> from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes

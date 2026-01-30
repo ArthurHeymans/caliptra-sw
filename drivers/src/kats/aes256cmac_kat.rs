@@ -12,7 +12,7 @@ Abstract:
 
 --*/
 
-use caliptra_drivers::{Aes, AesKey, CaliptraError, CaliptraResult, LEArray4x4, LEArray4x8};
+use crate::{Aes, AesKey, CaliptraError, CaliptraResult, LEArray4x4, LEArray4x8};
 
 // FROM ACVP test vector:
 // {

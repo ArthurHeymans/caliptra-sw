@@ -12,7 +12,7 @@ Abstract:
 
 --*/
 
-use caliptra_drivers::{Aes, AesOperation, CaliptraError, CaliptraResult, LEArray4x4, LEArray4x8};
+use crate::{Aes, AesOperation, CaliptraError, CaliptraResult, LEArray4x4, LEArray4x8};
 
 // Generated from Python code:
 // >>> import os

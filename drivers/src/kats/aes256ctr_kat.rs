@@ -12,7 +12,7 @@ Abstract:
 
 --*/
 
-use caliptra_drivers::{Aes, CaliptraError, CaliptraResult, LEArray4x4, LEArray4x8};
+use crate::{Aes, CaliptraError, CaliptraResult, LEArray4x4, LEArray4x8};
 
 // From NIST SP800-38A, F.5.5
 // CTR-AES256.Encrypt

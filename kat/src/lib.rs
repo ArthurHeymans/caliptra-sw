@@ -14,14 +14,6 @@ Abstract:
 
 #![no_std]
 
-#[cfg(not(feature = "rom"))]
-mod aes256cbc_kat;
-#[cfg(not(feature = "rom"))]
-mod aes256cmac_kat;
-#[cfg(not(feature = "rom"))]
-mod aes256ctr_kat;
-#[cfg(not(feature = "rom"))]
-mod aes256ecb_kat;
 mod ecc384_kat;
 mod ecdh_kat;
 mod hkdf_kat;
@@ -107,13 +99,13 @@ pub fn execute_kat(env: &mut KatsEnv) -> CaliptraResult<InitializedDrivers> {
         cprintln!("[kat] KDF-CMAC");
         caliptra_drivers::kats::execute_cmackdf_kat(env.aes)?;
         cprintln!("[kat] AES-ECB");
-        aes256ecb_kat::execute_ecb_kat(env.aes)?;
+        caliptra_drivers::kats::execute_ecb_kat(env.aes)?;
         cprintln!("[kat] AES-CBC");
-        aes256cbc_kat::execute_cbc_kat(env.aes)?;
+        caliptra_drivers::kats::execute_cbc_kat(env.aes)?;
         cprintln!("[kat] AES-CTR");
-        aes256ctr_kat::execute_ctr_kat(env.aes)?;
+        caliptra_drivers::kats::execute_ctr_kat(env.aes)?;
         cprintln!("[kat] AES-CMAC");
-        aes256cmac_kat::execute_cmac_kat(env.aes)?;
+        caliptra_drivers::kats::execute_cmac_kat(env.aes)?;
         cprintln!("[kat] AES-GCM");
         caliptra_drivers::kats::execute_gcm_kat(env.aes, env.trng)?;
     }
