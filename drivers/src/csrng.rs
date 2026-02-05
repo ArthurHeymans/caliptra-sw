@@ -528,16 +528,16 @@ fn set_health_check_thresholds(
         entropy_cfg.adaptp_lo_threshold
     );
     // configure the alert threshold and its inverse as required
-    e.alert_threshold().write(|w| {
-        w.alert_threshold(entropy_cfg.alert_threshold)
-            .alert_threshold_inv((!entropy_cfg.alert_threshold) & 0xffff)
-    });
+    // e.alert_threshold().write(|w| {
+    //     w.alert_threshold(entropy_cfg.alert_threshold)
+    //         .alert_threshold_inv((!entropy_cfg.alert_threshold) & 0xffff)
+    // });
 
-    e.health_test_windows()
-        .write(|w| w.fips_window(entropy_cfg.health_test_window));
+    // e.health_test_windows()
+    //     .write(|w| w.fips_window(entropy_cfg.health_test_window));
 
-    e.repcnt_thresholds()
-        .write(|w| w.fips_thresh(entropy_cfg.repcnt_threshold));
+    // e.repcnt_thresholds()
+    //     .write(|w| w.fips_thresh(entropy_cfg.repcnt_threshold));
 
     e.repcnts_thresholds()
         .write(|w| w.fips_thresh(entropy_cfg.repcnt_threshold));
