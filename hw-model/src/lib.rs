@@ -1334,9 +1334,6 @@ pub trait HwModel: SocManager {
         Err(ModelError::SubsystemSramError)
     }
 
-    /// Read payload from external MCU SRAM
-    fn read_payload_from_ss_staging_area(&mut self, len: usize) -> Result<Vec<u8>, ModelError>;
-
     /// Upload firmware to the mailbox.
     fn upload_firmware(&mut self, firmware: &[u8]) -> Result<(), ModelError> {
         self.upload_firmware_to_mbox(firmware)
@@ -1396,10 +1393,11 @@ pub trait HwModel: SocManager {
     /// The default (sw-emulator) implementation uses [`MCU_TEST_AES_KEY`] and
     /// [`MCU_TEST_IV`] and performs the mailbox sequence that the MCU ROM would
     /// execute:
-    ///   1. Import the AES key via CM_IMPORT
-    ///   2. Write the ciphertext to the subsystem staging area
-    ///   3. Issue CM_AES_GCM_DECRYPT_DMA to decrypt in place
-    ///   4. Verify the GCM authentication tag
+    ///   1. Query the firmware size and SHA-384 digest via GET_MCU_FW_SIZE
+    ///   2. Import the AES key via CM_IMPORT
+    ///   3. Write the ciphertext to the subsystem staging area
+    ///   4. Issue CM_AES_GCM_DECRYPT_DMA to decrypt in place
+    ///   5. Verify the GCM authentication tag
     ///
     /// `encrypted_mcu_fw` must be formatted as `ciphertext || 16-byte GCM tag`.
     fn decrypt_encrypted_mcu_firmware(
@@ -1408,7 +1406,8 @@ pub trait HwModel: SocManager {
     ) -> Result<(), ModelError> {
         use api::mailbox::{
             CmAesGcmDecryptDmaReq, CmAesGcmDecryptDmaResp, CmImportReq, CmImportResp, CmKeyUsage,
-            CommandId, MailboxReqHeader, MailboxRespHeader, CM_AES_GCM_DECRYPT_DMA_MAX_AAD_SIZE,
+            CommandId, GetMcuFwSizeResp, MailboxReqHeader, MailboxRespHeader,
+            CM_AES_GCM_DECRYPT_DMA_MAX_AAD_SIZE,
         };
         use zerocopy::transmute;
 
@@ -1417,10 +1416,37 @@ pub trait HwModel: SocManager {
             "encrypted MCU firmware must be at least 17 bytes (ciphertext + 16-byte tag)"
         );
 
+        // Step 1: Query the MCU firmware size via GET_MCU_FW_SIZE (as the
+        // real MCU ROM would do to learn the ciphertext length).
+        let mut get_size_cmd = MailboxReq::GetMcuFwSize(MailboxReqHeader { chksum: 0 });
+        get_size_cmd.populate_chksum().unwrap();
+
+        let resp = self
+            .mailbox_execute(
+                u32::from(CommandId::GET_MCU_FW_SIZE),
+                get_size_cmd.as_bytes().unwrap(),
+            )?
+            .ok_or(ModelError::MailboxNoResponseData)?;
+
+        let size_resp = GetMcuFwSizeResp::ref_from_bytes(resp.as_slice())
+            .map_err(|_| ModelError::MailboxNoResponseData)?;
+
         let (ciphertext, tag_bytes) = encrypted_mcu_fw.split_at(encrypted_mcu_fw.len() - 16);
+
+        // GET_MCU_FW_SIZE now returns the ciphertext length (excluding the
+        // 16-byte GCM tag) and a SHA-384 computed over that ciphertext only,
+        // matching what CM_AES_GCM_DECRYPT_DMA will verify.
+        assert_eq!(
+            size_resp.size as usize,
+            ciphertext.len(),
+            "GET_MCU_FW_SIZE returned unexpected size"
+        );
+        // Use the SHA-384 digest returned by Caliptra RT instead of
+        // recomputing it (mirrors what the real MCU ROM does).
+        let encrypted_sha384 = size_resp.sha384;
         let tag: [u8; 16] = tag_bytes.try_into().unwrap();
 
-        // Step 1: Import the test AES key to get a CMK
+        // Step 2: Import the test AES key to get a CMK
         let mut input = [0u8; 64];
         input[..32].copy_from_slice(&MCU_TEST_AES_KEY);
 
@@ -1448,11 +1474,8 @@ pub trait HwModel: SocManager {
         }
         let cmk = cm_import_resp.cmk.clone();
 
-        // Step 2: Write ciphertext to staging area and get the AXI address
+        // Step 3: Write ciphertext to staging area and get the AXI address
         let mcu_sram_addr = self.write_payload_to_ss_staging_area(ciphertext)?;
-
-        // Step 3: Compute SHA384 of ciphertext
-        let encrypted_sha384: [u8; 48] = sha2::Sha384::digest(ciphertext).into();
 
         // Step 4: Build and send CM_AES_GCM_DECRYPT_DMA request
         let decrypt_req = CmAesGcmDecryptDmaReq {

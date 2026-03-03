@@ -49,7 +49,7 @@ permissions:
   contents: read
 
 env:
-  CALIPTRA_MCU_COMMIT: 9d75c88ab722381341034feffb0926e3da1238ff
+  CALIPTRA_MCU_COMMIT: 2951e9e0a25450dbdd9d667ac821bb230666b3b7
 
 jobs:
   check_cache:

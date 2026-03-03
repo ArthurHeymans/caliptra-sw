@@ -2726,7 +2726,7 @@ impl Commands {
     /// 3. Verifies the SHA384 hash of the encrypted data at the AXI address (first DMA pass)
     /// 4. Performs in-place AES-GCM decryption via DMA (second pass)
     /// 5. Returns whether the GCM tag was verified successfully
-    #[cfg_attr(not(feature = "no-cfi"), cfi_impl_fn)]
+    #[cfg_attr(feature = "cfi", cfi_impl_fn)]
     #[inline(never)]
     pub(crate) fn aes_256_gcm_decrypt_dma(
         drivers: &mut Drivers,

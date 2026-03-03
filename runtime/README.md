@@ -39,7 +39,7 @@ The Runtime Firmware main function SHALL perform the following on cold boot rese
 * Initialize any SRAM structures used by Runtime Firmware
 * Upload the firwmare to the Manufacturer Control Unit (2.0, susbystem mode only)
 
-#### Encrypted Firmware Support (2.0, subsystem mode only)
+#### Encrypted Firmware Support (2.1, subsystem mode only)
 
 When ROM receives the `RI_DOWNLOAD_ENCRYPTED_FIRMWARE` command instead of `RI_DOWNLOAD_FIRMWARE`, it sets the boot mode to `EncryptedFirmware`. In this mode:
 

@@ -2320,26 +2320,12 @@ impl HwModel for ModelFpgaSubsystem {
         self.staging_physical_address()
     }
 
-    fn read_payload_from_ss_staging_area(&mut self, length: usize) -> Result<Vec<u8>, ModelError> {
-        let staging_offset = 0xc00000_usize / 4; // Convert to u32 offset since mci.ptr is *mut u32
-        let staging_ptr = unsafe { self.mmio.mci().unwrap().ptr.add(staging_offset) };
-
-        let length_words = (length + 3) / 4;
-        let mut payload = Vec::with_capacity(length_words * 4);
-        for i in 0..length_words {
-            let u32_value = unsafe { staging_ptr.add(i).read_volatile() };
-            payload.extend_from_slice(&u32_value.to_le_bytes());
-        }
-        payload.truncate(length); // Remove any extra bytes from the last chunk
-        Ok(payload)
-    }
-
     fn read_payload_from_ss_staging_area(&mut self, len: usize) -> Result<Vec<u8>, ModelError> {
         let staging_offset = 0xc00000_usize / 4; // Convert to u32 offset since mci.ptr is *mut u32
         let staging_ptr = unsafe { self.mmio.mci().unwrap().ptr.add(staging_offset) };
 
         let mut result = Vec::with_capacity(len);
-        let num_words = (len + 3) / 4;
+        let num_words = len.div_ceil(4);
 
         for i in 0..num_words {
             let u32_value = unsafe { staging_ptr.add(i).read_volatile() };

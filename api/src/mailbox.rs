@@ -248,6 +248,7 @@ impl CommandId {
     pub const CM_MLKEM_ENCAPSULATE: Self = Self(0x434D_4C45); // "CMLE"
     pub const CM_MLKEM_DECAPSULATE: Self = Self(0x434D_4C44); // "CMLD"
     pub const CM_AES_GCM_DECRYPT_DMA: Self = Self(0x434D_4444); // "CMDD"
+    pub const GET_MCU_FW_SIZE: Self = Self(0x474D_4653); // "GMFS"
 
     // OCP LOCK Commands
     pub const OCP_LOCK_REPORT_HEK_METADATA: Self = Self(0x5248_4D54); // "RHMT"
@@ -411,6 +412,7 @@ pub enum MailboxResp {
     CmMlkemDecapsulate(CmMlkemDecapsulateResp),
     CmDeriveStableKey(CmDeriveStableKeyResp),
     CmAesGcmDecryptDma(CmAesGcmDecryptDmaResp),
+    GetMcuFwSize(GetMcuFwSizeResp),
     ProductionAuthDebugUnlockChallenge(ProductionAuthDebugUnlockChallenge),
     GetPcrLog(GetPcrLogResp),
     ReallocateDpeContextLimits(ReallocateDpeContextLimitsResp),
@@ -497,6 +499,7 @@ impl MailboxResp {
             MailboxResp::CmMlkemDecapsulate(resp) => Ok(resp.as_bytes()),
             MailboxResp::CmDeriveStableKey(resp) => Ok(resp.as_bytes()),
             MailboxResp::CmAesGcmDecryptDma(resp) => Ok(resp.as_bytes()),
+            MailboxResp::GetMcuFwSize(resp) => Ok(resp.as_bytes()),
             MailboxResp::ProductionAuthDebugUnlockChallenge(resp) => Ok(resp.as_bytes()),
             MailboxResp::GetPcrLog(resp) => Ok(resp.as_bytes()),
             MailboxResp::ReallocateDpeContextLimits(resp) => Ok(resp.as_bytes()),
@@ -581,6 +584,7 @@ impl MailboxResp {
             MailboxResp::CmMlkemDecapsulate(resp) => Ok(resp.as_mut_bytes()),
             MailboxResp::CmDeriveStableKey(resp) => Ok(resp.as_mut_bytes()),
             MailboxResp::CmAesGcmDecryptDma(resp) => Ok(resp.as_mut_bytes()),
+            MailboxResp::GetMcuFwSize(resp) => Ok(resp.as_mut_bytes()),
             MailboxResp::ProductionAuthDebugUnlockChallenge(resp) => Ok(resp.as_mut_bytes()),
             MailboxResp::GetPcrLog(resp) => Ok(resp.as_mut_bytes()),
             MailboxResp::ReallocateDpeContextLimits(resp) => Ok(resp.as_mut_bytes()),
@@ -732,6 +736,7 @@ pub enum MailboxReq {
     CmMlkemDecapsulate(CmMlkemDecapsulateReq),
     CmDeriveStableKey(CmDeriveStableKeyReq),
     CmAesGcmDecryptDma(CmAesGcmDecryptDmaReq),
+    GetMcuFwSize(MailboxReqHeader),
     OcpLockReportHekMetadata(OcpLockReportHekMetadataReq),
     OcpLockGetAlgorithms(OcpLockGetAlgorithmsReq),
     OcpLockEnumerateHpkeHandles(OcpLockEnumerateHpkeHandlesReq),
@@ -836,6 +841,7 @@ impl MailboxReq {
             MailboxReq::CmMlkemDecapsulate(req) => Ok(req.as_bytes()),
             MailboxReq::CmDeriveStableKey(req) => Ok(req.as_bytes()),
             MailboxReq::CmAesGcmDecryptDma(req) => req.as_bytes_partial(),
+            MailboxReq::GetMcuFwSize(req) => Ok(req.as_bytes()),
             MailboxReq::OcpLockReportHekMetadata(req) => Ok(req.as_bytes()),
             MailboxReq::OcpLockGetAlgorithms(req) => Ok(req.as_bytes()),
             MailboxReq::OcpLockEnumerateHpkeHandles(req) => Ok(req.as_bytes()),
@@ -938,6 +944,7 @@ impl MailboxReq {
             MailboxReq::CmMlkemDecapsulate(req) => Ok(req.as_mut_bytes()),
             MailboxReq::CmDeriveStableKey(req) => Ok(req.as_mut_bytes()),
             MailboxReq::CmAesGcmDecryptDma(req) => req.as_bytes_partial_mut(),
+            MailboxReq::GetMcuFwSize(req) => Ok(req.as_mut_bytes()),
             MailboxReq::OcpLockReportHekMetadata(req) => Ok(req.as_mut_bytes()),
             MailboxReq::OcpLockGetAlgorithms(req) => Ok(req.as_mut_bytes()),
             MailboxReq::OcpLockInitializeMekSecret(req) => Ok(req.as_mut_bytes()),
@@ -1040,6 +1047,7 @@ impl MailboxReq {
             MailboxReq::CmMlkemDecapsulate(_) => CommandId::CM_MLKEM_DECAPSULATE,
             MailboxReq::CmDeriveStableKey(_) => CommandId::CM_DERIVE_STABLE_KEY,
             MailboxReq::CmAesGcmDecryptDma(_) => CommandId::CM_AES_GCM_DECRYPT_DMA,
+            MailboxReq::GetMcuFwSize(_) => CommandId::GET_MCU_FW_SIZE,
             MailboxReq::GetPcrLog(_) => CommandId::GET_PCR_LOG,
             MailboxReq::FeProg(_) => CommandId::FE_PROG,
             MailboxReq::ProductionAuthDebugUnlockReq(_) => {
@@ -4969,6 +4977,33 @@ pub struct CmAesGcmDecryptDmaResp {
 }
 
 impl Response for CmAesGcmDecryptDmaResp {}
+
+// GET_MCU_FW_SIZE
+/// Response for the GET_MCU_FW_SIZE command, which returns the size and
+/// SHA-384 digest of the MCU firmware image that was downloaded during the
+/// recovery flow. Returning the digest avoids a redundant recomputation by
+/// the MCU ROM before issuing CM_AES_GCM_DECRYPT_DMA.
+#[repr(C)]
+#[derive(Debug, IntoBytes, FromBytes, KnownLayout, Immutable, PartialEq, Eq)]
+pub struct GetMcuFwSizeResp {
+    pub hdr: MailboxRespHeader,
+    /// Size of the MCU firmware image in bytes
+    pub size: u32,
+    /// SHA-384 digest of the MCU firmware image (ciphertext)
+    pub sha384: [u8; 48],
+}
+
+impl Default for GetMcuFwSizeResp {
+    fn default() -> Self {
+        Self {
+            hdr: MailboxRespHeader::default(),
+            size: 0,
+            sha384: [0u8; 48],
+        }
+    }
+}
+
+impl Response for GetMcuFwSizeResp {}
 
 // OCP_LOCK_REPORT_HEK_METADATA
 #[repr(C)]

@@ -512,24 +512,6 @@ impl HwModel for ModelEmulated {
         Ok(payload)
     }
 
-    fn read_payload_from_ss_staging_area(&mut self, len: usize) -> Result<Vec<u8>, ModelError> {
-        if !self.subsystem_mode() {
-            return Err(ModelError::SubsystemSramError);
-        }
-
-        let data = self
-            .cpu
-            .bus
-            .bus
-            .dma
-            .axi
-            .mcu_sram
-            .data()
-            .get(..len)
-            .ok_or(ModelError::SubsystemSramError)?;
-        Ok(data.to_vec())
-    }
-
     fn fuses(&self) -> &Fuses {
         &self.fuses
     }
